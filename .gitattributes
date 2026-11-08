@@ -1,0 +1,20 @@
+# Auto detect text files and perform LF normalization
+* text=auto
+
+# Unity YAML files
+*.mat text
+*.anim text
+*.unity text
+*.prefab text
+*.physicsMaterial2D text
+*.physicMaterial text
+*.asset text
+*.meta text eol=lf
+*.controller text
+
+# Code files
+*.cs text diff=csharp
+*.cginc text
+*.shader text
+*.asmdef text
+*.json text

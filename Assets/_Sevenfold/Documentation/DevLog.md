@@ -1,0 +1,4 @@
+# Development Log
+
+- 2026-11-08: Initial project skeleton setup. Generated folder layout, assembly definitions (Runtime, Editor, Tests.EditMode), initial SevenfoldMenu editor stubs, SanityTests edit-mode test, and documentation templates.
+- 2026-11-08: Initialized Git repository, configured .gitignore and .gitattributes, created initial commit tracking skeleton and configuration files.
