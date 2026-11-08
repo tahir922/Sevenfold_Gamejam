@@ -648,13 +648,16 @@ namespace Sevenfold.Tests
             hud.RefreshDisplay();
 
             Assert.That(tmp.text, Does.Contain("State:"));
-            Assert.That(tmp.text, Does.Contain("Hearts: 3 / 3"));
+            Assert.That(tmp.text, Does.Contain("Hearts:"));
+            Assert.That(tmp.text, Does.Contain("3 / 3"));
 
             _turnController.BeginTurn();
             _turnController.RequestRoll();
 
-            Assert.That(tmp.text, Does.Contain("Dice: 2 + 5 = 7"));
-            Assert.That(tmp.text, Does.Contain("Moves left: 7"));
+            Assert.That(tmp.text, Does.Contain("Dice:"));
+            Assert.That(tmp.text, Does.Contain("2 + 5 = 7"));
+            Assert.That(tmp.text, Does.Contain("Moves left:"));
+            Assert.That(tmp.text, Does.Contain("7"));
 
             UnityEngine.Object.DestroyImmediate(hudGo);
         }

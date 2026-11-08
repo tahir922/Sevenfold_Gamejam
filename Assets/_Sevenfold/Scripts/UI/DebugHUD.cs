@@ -1,5 +1,6 @@
 using Sevenfold.Core;
 using Sevenfold.Dice;
+using Sevenfold.Player;
 using TMPro;
 using UnityEngine;
 
