@@ -1,0 +1,38 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 33431c5ff6d83df44ab429f924098633, type: 3}
+  m_Name: GameConfig
+  m_EditorClassIdentifier: Sevenfold.Runtime::Sevenfold.Core.GameConfigSO
+  _boardWidth: 7
+  _boardHeight: 7
+  _cellSpacing: 1.25
+  _tileTopSize: 1.12
+  _diceCount: 2
+  _diceSides: 6
+  _luckyNumber: 7
+  _starsRequired: 7
+  _startingHearts: 3
+  _startingCharms: 1
+  _maxCharms: 3
+  _maxTurns: 7
+  _autoEndTurn: 1
+  _autoEndTurnDelay: 0.3
+  _playerMoveDuration: 0.22
+  _playerHopHeight: 0.12
+  _diceAnimDuration: 0.7
+  _fatesSightRadius: 3
+  _musicVolume: 0.35
+  _sfxVolume: 0.75
+  _cameraShakeEnabled: 1
+  _useFixedSeed: 0
+  _fixedSeed: 0
+  _forcedRolls: []
