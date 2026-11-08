@@ -2,12 +2,17 @@ using System.Collections.Generic;
 using System.IO;
 using Sevenfold.Board;
 using Sevenfold.Core;
+using Sevenfold.Dice;
 using Sevenfold.Player;
+using Sevenfold.UI;
+using TMPro;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEditor.TestTools.TestRunner.Api;
 using UnityEngine;
+using UnityEngine.InputSystem.UI;
 using UnityEngine.SceneManagement;
+using UnityEngine.UI;
 
 namespace Sevenfold.EditorTools
 {
@@ -22,6 +27,8 @@ namespace Sevenfold.EditorTools
         private const string TileMaterialPath = "Assets/_Sevenfold/Art/Materials/M_Tile_Default.mat";
         private const string PlayerBodyMaterialPath = "Assets/_Sevenfold/Art/Materials/M_Player_Body.mat";
         private const string PlayerHatMaterialPath = "Assets/_Sevenfold/Art/Materials/M_Player_Hat.mat";
+        private const string DiceIvoryMaterialPath = "Assets/_Sevenfold/Art/Materials/M_Dice_Ivory.mat";
+        private const string DicePipMaterialPath = "Assets/_Sevenfold/Art/Materials/M_Dice_Pip.mat";
         private const string ConeHatMeshPath = "Assets/_Sevenfold/Art/Models/PlayerHat_Cone.asset";
         private const string PlayerPrefabPath = "Assets/_Sevenfold/Prefabs/Player/PlayerPawn.prefab";
 
@@ -204,6 +211,10 @@ namespace Sevenfold.EditorTools
             // 9. Player Prefab
             CreateOrUpdatePlayerPrefab(playerPres, bodyMat, hatMat, coneMesh);
 
+            // 10. Dice Materials
+            GetOrCreateMaterial(DiceIvoryMaterialPath, "M_Dice_Ivory", "#FDF6E2");
+            GetOrCreateMaterial(DicePipMaterialPath, "M_Dice_Pip", "#1E1E24");
+
             AssetDatabase.SaveAssets();
             AssetDatabase.Refresh();
 
@@ -273,6 +284,8 @@ namespace Sevenfold.EditorTools
                 playerPrefab = AssetDatabase.LoadAssetAtPath<GameObject>(PlayerPrefabPath);
             }
             var tileMaterial = GetOrCreateTileMaterial();
+            var diceIvoryMat = GetOrCreateMaterial(DiceIvoryMaterialPath, "M_Dice_Ivory", "#FDF6E2");
+            var dicePipMat = GetOrCreateMaterial(DicePipMaterialPath, "M_Dice_Pip", "#1E1E24");
 
             // 3. __Generated_BoardRoot
             var boardRoot = new GameObject("__Generated_BoardRoot");
@@ -317,9 +330,18 @@ namespace Sevenfold.EditorTools
             moverSo.FindProperty("_visualChild").objectReferenceValue = playerGo.transform.Find("Visual");
             moverSo.ApplyModifiedPropertiesWithoutUndo();
 
-            // 5. __Generated_GameRoot
+            // 5. __Generated_DiceRoot (Two 3D Dice beside the board)
+            var diceRoot = new GameObject("__Generated_DiceRoot");
+            Undo.RegisterCreatedObjectUndo(diceRoot, "Create __Generated_DiceRoot");
+
+            var dieViewA = CreateDiceObject("Die_1", diceRoot.transform, new Vector3(4.8f, 0.3f, -2.2f), diceIvoryMat, dicePipMat, new Vector3(1.3f, 2.7f, 0.9f));
+            var dieViewB = CreateDiceObject("Die_2", diceRoot.transform, new Vector3(4.8f, 0.3f, -3.4f), diceIvoryMat, dicePipMat, new Vector3(-1.1f, 2.5f, 1.4f));
+
+            // 6. __Generated_GameRoot
             var gameRoot = new GameObject("__Generated_GameRoot");
             Undo.RegisterCreatedObjectUndo(gameRoot, "Create __Generated_GameRoot");
+
+            var flowController = gameRoot.AddComponent<GameFlowController>();
 
             var inputRouter = gameRoot.AddComponent<PlayerInputRouter>();
             var inputSo = new SerializedObject(inputRouter);
@@ -327,16 +349,24 @@ namespace Sevenfold.EditorTools
             inputSo.FindProperty("_inputEnabled").boolValue = true;
             inputSo.ApplyModifiedPropertiesWithoutUndo();
 
-            var debugHarness = gameRoot.AddComponent<DebugMovementHarness>();
-            var harnessSo = new SerializedObject(debugHarness);
-            harnessSo.FindProperty("_config").objectReferenceValue = config;
-            harnessSo.FindProperty("_board").objectReferenceValue = boardDef;
-            harnessSo.FindProperty("_boardBuilder").objectReferenceValue = boardBuilder;
-            harnessSo.FindProperty("_inputRouter").objectReferenceValue = inputRouter;
-            harnessSo.FindProperty("_playerMover").objectReferenceValue = playerMover;
-            harnessSo.ApplyModifiedPropertiesWithoutUndo();
+            var turnController = gameRoot.AddComponent<TurnController>();
+            var turnSo = new SerializedObject(turnController);
+            turnSo.FindProperty("_config").objectReferenceValue = config;
+            turnSo.FindProperty("_board").objectReferenceValue = boardDef;
+            turnSo.FindProperty("_boardBuilder").objectReferenceValue = boardBuilder;
+            turnSo.FindProperty("_playerMover").objectReferenceValue = playerMover;
+            turnSo.FindProperty("_flowController").objectReferenceValue = flowController;
+            turnSo.FindProperty("_diceViewA").objectReferenceValue = dieViewA;
+            turnSo.FindProperty("_diceViewB").objectReferenceValue = dieViewB;
+            turnSo.FindProperty("_inputRouter").objectReferenceValue = inputRouter;
+            turnSo.ApplyModifiedPropertiesWithoutUndo();
 
-            // 6. __Generated_CameraRig
+            // 7. __Generated_UIRoot (Canvas + DebugHUD + EventSystem)
+            var uiRoot = new GameObject("__Generated_UIRoot");
+            Undo.RegisterCreatedObjectUndo(uiRoot, "Create __Generated_UIRoot");
+            CreateDebugHUD(uiRoot.transform, flowController, turnController);
+
+            // 8. __Generated_CameraRig
             var camRig = new GameObject("__Generated_CameraRig");
             Undo.RegisterCreatedObjectUndo(camRig, "Create __Generated_CameraRig");
             camRig.tag = "MainCamera";
@@ -366,7 +396,7 @@ namespace Sevenfold.EditorTools
             camSo.ApplyModifiedPropertiesWithoutUndo();
             framer.RecalculateFraming();
 
-            // 7. __Generated_Lighting
+            // 9. __Generated_Lighting
             var lightGo = new GameObject("__Generated_Lighting");
             Undo.RegisterCreatedObjectUndo(lightGo, "Create __Generated_Lighting");
             lightGo.transform.position = new Vector3(0f, 10f, 0f);
@@ -379,11 +409,11 @@ namespace Sevenfold.EditorTools
             light.shadows = LightShadows.Soft;
             light.shadowStrength = 0.6f;
 
-            // 8. Save scene
+            // 10. Save scene
             EditorSceneManager.MarkSceneDirty(scene);
             EditorSceneManager.SaveScene(scene, GameplayScenePath);
 
-            // 9. EditorBuildSettings: MainMenu (if exists) at index 0, Gameplay at index 1
+            // 11. EditorBuildSettings: MainMenu (if exists) at index 0, Gameplay at index 1
             UpdateEditorBuildSettings();
 
             Debug.Log($"<color=green>[Sevenfold] Gameplay Scene built successfully at {GameplayScenePath}.</color>");
@@ -430,11 +460,27 @@ namespace Sevenfold.EditorTools
                     failures++;
                 }
 
+                if (config.LuckyNumber > 0)
+                    Debug.Log($"[Sevenfold] PASS: Lucky number valid ({config.LuckyNumber} > 0)");
+                else
+                {
+                    Debug.LogError($"[Sevenfold] FAIL: Lucky number must be > 0, was {config.LuckyNumber}");
+                    failures++;
+                }
+
                 if (config.StartingHearts > 0)
                     Debug.Log($"[Sevenfold] PASS: Starting hearts valid ({config.StartingHearts} > 0)");
                 else
                 {
                     Debug.LogError($"[Sevenfold] FAIL: Starting hearts must be > 0, was {config.StartingHearts}");
+                    failures++;
+                }
+
+                if (config.StartingCharms >= 0 && config.MaxCharms >= config.StartingCharms)
+                    Debug.Log($"[Sevenfold] PASS: Charm settings valid ({config.StartingCharms} <= {config.MaxCharms})");
+                else
+                {
+                    Debug.LogError($"[Sevenfold] FAIL: Starting charms must be >= 0 and <= MaxCharms.");
                     failures++;
                 }
 
@@ -579,6 +625,29 @@ namespace Sevenfold.EditorTools
                     Debug.LogError("[Sevenfold] FAIL: Player prefab is missing PlayerGridMover component.");
                     failures++;
                 }
+            }
+
+            // Dice materials check
+            var ivoryMat = AssetDatabase.LoadAssetAtPath<Material>(DiceIvoryMaterialPath);
+            var pipMat = AssetDatabase.LoadAssetAtPath<Material>(DicePipMaterialPath);
+            if (ivoryMat != null)
+            {
+                Debug.Log("[Sevenfold] PASS: Dice ivory material found.");
+            }
+            else
+            {
+                Debug.LogError($"[Sevenfold] FAIL: Dice ivory material missing at {DiceIvoryMaterialPath}");
+                failures++;
+            }
+
+            if (pipMat != null)
+            {
+                Debug.Log("[Sevenfold] PASS: Dice pip material found.");
+            }
+            else
+            {
+                Debug.LogError($"[Sevenfold] FAIL: Dice pip material missing at {DicePipMaterialPath}");
+                failures++;
             }
 
             if (failures == 0)
@@ -825,6 +894,161 @@ namespace Sevenfold.EditorTools
             var prefab = PrefabUtility.SaveAsPrefabAsset(tempRoot, PlayerPrefabPath);
             Object.DestroyImmediate(tempRoot);
             return prefab;
+        }
+
+        private static DiceView CreateDiceObject(string name, Transform parent, Vector3 localPos, Material ivoryMat, Material pipMat, Vector3 spinAxis)
+        {
+            var dieGo = new GameObject(name);
+            if (parent != null)
+            {
+                dieGo.transform.SetParent(parent, false);
+            }
+            dieGo.transform.localPosition = localPos;
+            dieGo.transform.localRotation = Quaternion.identity;
+
+            var diceView = dieGo.AddComponent<DiceView>();
+            diceView.RestPosition = localPos;
+            diceView.SpinAxis = spinAxis;
+
+            // Cube body: 0.6 size
+            var body = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            body.name = "Body";
+            body.transform.SetParent(dieGo.transform, false);
+            body.transform.localPosition = Vector3.zero;
+            body.transform.localRotation = Quaternion.identity;
+            body.transform.localScale = new Vector3(0.6f, 0.6f, 0.6f);
+            var col = body.GetComponent<Collider>();
+            if (col != null) Object.DestroyImmediate(col);
+
+            var bodyRend = body.GetComponent<MeshRenderer>();
+            if (ivoryMat != null) bodyRend.sharedMaterial = ivoryMat;
+
+            // Pips root
+            var pipsRoot = new GameObject("Pips");
+            pipsRoot.transform.SetParent(dieGo.transform, false);
+            pipsRoot.transform.localPosition = Vector3.zero;
+
+            float d = 0.14f;
+            float faceOffset = 0.301f;
+            float pipScale = 0.08f;
+
+            void AddPip(Vector3 offset)
+            {
+                var pip = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+                pip.name = "Pip";
+                pip.transform.SetParent(pipsRoot.transform, false);
+                pip.transform.localPosition = offset;
+                pip.transform.localScale = Vector3.one * pipScale;
+                var pipCol = pip.GetComponent<Collider>();
+                if (pipCol != null) Object.DestroyImmediate(pipCol);
+                var pipRend = pip.GetComponent<MeshRenderer>();
+                if (pipMat != null) pipRend.sharedMaterial = pipMat;
+            }
+
+            // Face 1 (+Y)
+            AddPip(new Vector3(0f, faceOffset, 0f));
+
+            // Face 6 (-Y)
+            AddPip(new Vector3(-d, -faceOffset, -d));
+            AddPip(new Vector3(-d, -faceOffset, 0f));
+            AddPip(new Vector3(-d, -faceOffset, d));
+            AddPip(new Vector3(d, -faceOffset, -d));
+            AddPip(new Vector3(d, -faceOffset, 0f));
+            AddPip(new Vector3(d, -faceOffset, d));
+
+            // Face 2 (+Z)
+            AddPip(new Vector3(-d, -d, faceOffset));
+            AddPip(new Vector3(d, d, faceOffset));
+
+            // Face 5 (-Z)
+            AddPip(new Vector3(-d, -d, -faceOffset));
+            AddPip(new Vector3(-d, d, -faceOffset));
+            AddPip(new Vector3(d, -d, -faceOffset));
+            AddPip(new Vector3(d, d, -faceOffset));
+            AddPip(new Vector3(0f, 0f, -faceOffset));
+
+            // Face 3 (+X)
+            AddPip(new Vector3(faceOffset, -d, -d));
+            AddPip(new Vector3(faceOffset, 0f, 0f));
+            AddPip(new Vector3(faceOffset, d, d));
+
+            // Face 4 (-X)
+            AddPip(new Vector3(-faceOffset, -d, -d));
+            AddPip(new Vector3(-faceOffset, -d, d));
+            AddPip(new Vector3(-faceOffset, d, -d));
+            AddPip(new Vector3(-faceOffset, d, d));
+
+            var diceSo = new SerializedObject(diceView);
+            diceSo.FindProperty("_restPosition").vector3Value = localPos;
+            diceSo.FindProperty("_spinAxis").vector3Value = spinAxis;
+            diceSo.FindProperty("_currentFace").intValue = 1;
+            diceSo.ApplyModifiedPropertiesWithoutUndo();
+
+            return diceView;
+        }
+
+        private static DebugHUD CreateDebugHUD(Transform parent, GameFlowController flow, TurnController turn)
+        {
+            var canvasGo = new GameObject("DebugCanvas");
+            if (parent != null) canvasGo.transform.SetParent(parent, false);
+
+            var canvas = canvasGo.AddComponent<Canvas>();
+            canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+            canvas.sortingOrder = 100;
+
+            var scaler = canvasGo.AddComponent<CanvasScaler>();
+            scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
+            scaler.referenceResolution = new Vector2(1920, 1080);
+            scaler.matchWidthOrHeight = 0.5f;
+
+            canvasGo.AddComponent<GraphicRaycaster>();
+
+            // Semi-transparent dark container panel
+            var panelGo = new GameObject("Panel");
+            panelGo.transform.SetParent(canvasGo.transform, false);
+            var panelRect = panelGo.AddComponent<RectTransform>();
+            panelRect.anchorMin = new Vector2(0f, 1f);
+            panelRect.anchorMax = new Vector2(0f, 1f);
+            panelRect.pivot = new Vector2(0f, 1f);
+            panelRect.anchoredPosition = new Vector2(24f, -24f);
+            panelRect.sizeDelta = new Vector2(400f, 320f);
+
+            var panelImg = panelGo.AddComponent<Image>();
+            panelImg.color = new Color(0.08f, 0.11f, 0.16f, 0.88f);
+
+            // Status Text
+            var textGo = new GameObject("StatusText");
+            textGo.transform.SetParent(panelGo.transform, false);
+            var textRect = textGo.AddComponent<RectTransform>();
+            textRect.anchorMin = Vector2.zero;
+            textRect.anchorMax = Vector2.one;
+            textRect.offsetMin = new Vector2(16f, 16f);
+            textRect.offsetMax = new Vector2(-16f, -16f);
+
+            var tmp = textGo.AddComponent<TextMeshProUGUI>();
+            tmp.fontSize = 20;
+            tmp.color = Color.white;
+            tmp.lineSpacing = 6;
+            tmp.raycastTarget = false;
+            if (TMP_Settings.defaultFontAsset != null)
+            {
+                tmp.font = TMP_Settings.defaultFontAsset;
+            }
+
+            var debugHud = canvasGo.AddComponent<DebugHUD>();
+            var hudSo = new SerializedObject(debugHud);
+            hudSo.FindProperty("_statusText").objectReferenceValue = tmp;
+            hudSo.FindProperty("_flowController").objectReferenceValue = flow;
+            hudSo.FindProperty("_turnController").objectReferenceValue = turn;
+            hudSo.ApplyModifiedPropertiesWithoutUndo();
+
+            // EventSystem with InputSystemUIInputModule
+            var esGo = new GameObject("EventSystem");
+            if (parent != null) esGo.transform.SetParent(parent, false);
+            esGo.AddComponent<UnityEngine.EventSystems.EventSystem>();
+            esGo.AddComponent<InputSystemUIInputModule>();
+
+            return debugHud;
         }
 
         private static T GetOrCreateScriptableObject<T>(string assetPath) where T : ScriptableObject

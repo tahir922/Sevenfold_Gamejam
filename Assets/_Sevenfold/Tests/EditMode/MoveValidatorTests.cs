@@ -17,7 +17,7 @@ namespace Sevenfold.Tests
         private TileDefinitionSO _gateTile;
 
         [SetUp]
-        public void Setup()
+        public void SetUp()
         {
             _normalTile = ScriptableObject.CreateInstance<TileDefinitionSO>();
             _normalTile.TileKind = TileKind.Normal;

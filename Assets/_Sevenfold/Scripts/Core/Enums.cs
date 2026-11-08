@@ -35,6 +35,12 @@ namespace Sevenfold.Core
         SecondChance
     }
 
+    public enum DefeatReason
+    {
+        HeartsDepleted,
+        TurnLimit
+    }
+
     public enum Direction
     {
         Up,
@@ -58,3 +64,4 @@ namespace Sevenfold.Core
         }
     }
 }
+

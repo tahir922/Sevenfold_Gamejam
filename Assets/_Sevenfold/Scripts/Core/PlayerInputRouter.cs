@@ -105,7 +105,7 @@ namespace Sevenfold.Core
 
             CreateAction("Pause", _config.PauseBindings, () =>
             {
-                if (_inputEnabled) PausePressed?.Invoke();
+                PausePressed?.Invoke();
             });
         }
 
