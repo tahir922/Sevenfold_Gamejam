@@ -1,9 +1,12 @@
 using System.Collections.Generic;
+using System.IO;
 using Sevenfold.Board;
 using Sevenfold.Core;
 using UnityEditor;
+using UnityEditor.SceneManagement;
 using UnityEditor.TestTools.TestRunner.Api;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 
 namespace Sevenfold.EditorTools
 {
@@ -12,6 +15,7 @@ namespace Sevenfold.EditorTools
         private const string RootDataPath = "Assets/_Sevenfold/Data";
         private const string ConfigPath = "Assets/_Sevenfold/Data/Config/GameConfig.asset";
         private const string BoardPath = "Assets/_Sevenfold/Data/Boards/Board_Main.asset";
+        private const string TileMaterialPath = "Assets/_Sevenfold/Art/Materials/M_Tile_Default.mat";
 
         private const string TileNormalPath = "Assets/_Sevenfold/Data/Tiles/Tile_Normal.asset";
         private const string TileStarPath = "Assets/_Sevenfold/Data/Tiles/Tile_Star.asset";
@@ -24,6 +28,9 @@ namespace Sevenfold.EditorTools
         private const string BlessingFatesSightPath = "Assets/_Sevenfold/Data/Blessings/Blessing_FatesSight.asset";
         private const string BlessingFortuneWardPath = "Assets/_Sevenfold/Data/Blessings/Blessing_FortuneWard.asset";
         private const string BlessingSecondChancePath = "Assets/_Sevenfold/Data/Blessings/Blessing_SecondChance.asset";
+
+        private const string GameplayScenePath = "Assets/_Sevenfold/Scenes/Gameplay.unity";
+        private const string MainMenuScenePath = "Assets/_Sevenfold/Scenes/MainMenu.unity";
 
         [MenuItem("Sevenfold/Setup/Create Or Update Default Data")]
         public static void CreateOrUpdateDefaultData()
@@ -156,6 +163,9 @@ namespace Sevenfold.EditorTools
             SetupBlessing(BlessingSecondChancePath, BlessingKind.SecondChance, "Second Chance",
                 "Roll both dice again ONCE. Show both totals; player picks original 7 or the new total. The reroll can never trigger Lucky Fate.", 0, 0, 1);
 
+            // 5. Default Material
+            GetOrCreateTileMaterial();
+
             AssetDatabase.SaveAssets();
             AssetDatabase.Refresh();
 
@@ -165,7 +175,130 @@ namespace Sevenfold.EditorTools
         [MenuItem("Sevenfold/Setup/Build Gameplay Scene")]
         public static void BuildGameplayScene()
         {
-            Debug.Log("[Sevenfold] Build Gameplay Scene: not implemented yet");
+            EnsureDataDirectories();
+            EnsureFolder("Assets/_Sevenfold", "Scenes");
+
+            Scene scene;
+            bool sceneFileExists = File.Exists(GameplayScenePath);
+
+            if (sceneFileExists)
+            {
+                scene = EditorSceneManager.OpenScene(GameplayScenePath, OpenSceneMode.Single);
+            }
+            else
+            {
+                scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
+                EditorSceneManager.SaveScene(scene, GameplayScenePath);
+            }
+
+            // 1. Delete and recreate ONLY roots named __Generated_*
+            var rootObjects = scene.GetRootGameObjects();
+            for (int i = 0; i < rootObjects.Length; i++)
+            {
+                var root = rootObjects[i];
+                if (root != null && root.name.StartsWith("__Generated_"))
+                {
+                    Undo.DestroyObjectImmediate(root);
+                }
+            }
+
+            // 2. Create EnvironmentRoot ONLY if it does not exist (never touch it otherwise)
+            bool hasEnvironmentRoot = false;
+            foreach (var root in scene.GetRootGameObjects())
+            {
+                if (root != null && root.name == "EnvironmentRoot")
+                {
+                    hasEnvironmentRoot = true;
+                    break;
+                }
+            }
+            if (!hasEnvironmentRoot)
+            {
+                var envRoot = new GameObject("EnvironmentRoot");
+                Undo.RegisterCreatedObjectUndo(envRoot, "Create EnvironmentRoot");
+            }
+
+            // Load board data & material
+            var boardDef = AssetDatabase.LoadAssetAtPath<BoardDefinitionSO>(BoardPath);
+            if (boardDef == null)
+            {
+                CreateOrUpdateDefaultData();
+                boardDef = AssetDatabase.LoadAssetAtPath<BoardDefinitionSO>(BoardPath);
+            }
+            var tileMaterial = GetOrCreateTileMaterial();
+
+            // 3. __Generated_GameRoot
+            var gameRoot = new GameObject("__Generated_GameRoot");
+            Undo.RegisterCreatedObjectUndo(gameRoot, "Create __Generated_GameRoot");
+
+            // 4. __Generated_BoardRoot
+            var boardRoot = new GameObject("__Generated_BoardRoot");
+            Undo.RegisterCreatedObjectUndo(boardRoot, "Create __Generated_BoardRoot");
+
+            var cellsRoot = new GameObject("CellsRoot");
+            cellsRoot.transform.SetParent(boardRoot.transform, false);
+
+            var boardBuilder = boardRoot.AddComponent<BoardBuilder>();
+            var boardSo = new SerializedObject(boardBuilder);
+            boardSo.FindProperty("_board").objectReferenceValue = boardDef;
+            boardSo.FindProperty("_cellsRoot").objectReferenceValue = cellsRoot.transform;
+            boardSo.FindProperty("_tileMaterial").objectReferenceValue = tileMaterial;
+            boardSo.ApplyModifiedPropertiesWithoutUndo();
+
+            // Populate cells in editor scene
+            boardBuilder.Build();
+
+            // 5. __Generated_CameraRig
+            var camRig = new GameObject("__Generated_CameraRig");
+            Undo.RegisterCreatedObjectUndo(camRig, "Create __Generated_CameraRig");
+            camRig.tag = "MainCamera";
+
+            var camRot = Quaternion.Euler(40f, 45f, 0f);
+            Vector3 camForward = camRot * Vector3.forward;
+            // Frame distance ~25 units looking at origin
+            camRig.transform.position = -camForward * 25f;
+            camRig.transform.rotation = camRot;
+
+            var cam = camRig.AddComponent<Camera>();
+            cam.orthographic = true;
+            cam.orthographicSize = 5.3f;
+            cam.clearFlags = CameraClearFlags.SolidColor;
+            // Pastel sky background #BFD7EA
+            cam.backgroundColor = new Color(191f / 255f, 215f / 255f, 234f / 255f, 1f);
+            cam.nearClipPlane = 0.3f;
+            cam.farClipPlane = 100f;
+
+            camRig.AddComponent<AudioListener>();
+
+            var framer = camRig.AddComponent<CameraFramer>();
+            var camSo = new SerializedObject(framer);
+            camSo.FindProperty("_camera").objectReferenceValue = cam;
+            camSo.FindProperty("_board").objectReferenceValue = boardDef;
+            camSo.FindProperty("_hudMarginFactor").floatValue = 0.70f;
+            camSo.ApplyModifiedPropertiesWithoutUndo();
+            framer.RecalculateFraming();
+
+            // 6. __Generated_Lighting
+            var lightGo = new GameObject("__Generated_Lighting");
+            Undo.RegisterCreatedObjectUndo(lightGo, "Create __Generated_Lighting");
+            lightGo.transform.position = new Vector3(0f, 10f, 0f);
+            lightGo.transform.rotation = Quaternion.Euler(50f, -30f, 0f);
+
+            var light = lightGo.AddComponent<Light>();
+            light.type = LightType.Directional;
+            light.color = new Color(1.0f, 0.96f, 0.90f); // warm white
+            light.intensity = 1.1f;
+            light.shadows = LightShadows.Soft;
+            light.shadowStrength = 0.6f;
+
+            // 7. Save scene
+            EditorSceneManager.MarkSceneDirty(scene);
+            EditorSceneManager.SaveScene(scene, GameplayScenePath);
+
+            // 8. EditorBuildSettings: MainMenu (if exists) at index 0, Gameplay at index 1
+            UpdateEditorBuildSettings();
+
+            Debug.Log($"<color=green>[Sevenfold] Gameplay Scene built successfully at {GameplayScenePath}.</color>");
         }
 
         [MenuItem("Sevenfold/Setup/Build Main Menu Scene")]
@@ -275,6 +408,20 @@ namespace Sevenfold.EditorTools
             api.Execute(new ExecutionSettings(filter));
         }
 
+        private static void UpdateEditorBuildSettings()
+        {
+            var buildScenes = new List<EditorBuildSettingsScene>();
+            if (File.Exists(MainMenuScenePath))
+            {
+                buildScenes.Add(new EditorBuildSettingsScene(MainMenuScenePath, true));
+            }
+            if (File.Exists(GameplayScenePath))
+            {
+                buildScenes.Add(new EditorBuildSettingsScene(GameplayScenePath, true));
+            }
+            EditorBuildSettings.scenes = buildScenes.ToArray();
+        }
+
         private static void EnsureDataDirectories()
         {
             EnsureFolder("Assets/_Sevenfold", "Data");
@@ -282,6 +429,8 @@ namespace Sevenfold.EditorTools
             EnsureFolder("Assets/_Sevenfold/Data", "Tiles");
             EnsureFolder("Assets/_Sevenfold/Data", "Boards");
             EnsureFolder("Assets/_Sevenfold/Data", "Blessings");
+            EnsureFolder("Assets/_Sevenfold", "Art");
+            EnsureFolder("Assets/_Sevenfold/Art", "Materials");
         }
 
         private static void EnsureFolder(string parentFolder, string newFolder)
@@ -291,6 +440,26 @@ namespace Sevenfold.EditorTools
             {
                 AssetDatabase.CreateFolder(parentFolder, newFolder);
             }
+        }
+
+        private static Material GetOrCreateTileMaterial()
+        {
+            EnsureFolder("Assets/_Sevenfold", "Art");
+            EnsureFolder("Assets/_Sevenfold/Art", "Materials");
+
+            var mat = AssetDatabase.LoadAssetAtPath<Material>(TileMaterialPath);
+            if (mat == null)
+            {
+                var shader = Shader.Find("Universal Render Pipeline/Lit");
+                if (shader == null)
+                {
+                    shader = Shader.Find("Standard");
+                }
+                mat = new Material(shader) { name = "M_Tile_Default" };
+                AssetDatabase.CreateAsset(mat, TileMaterialPath);
+                AssetDatabase.SaveAssets();
+            }
+            return mat;
         }
 
         private static T GetOrCreateScriptableObject<T>(string assetPath) where T : ScriptableObject
