@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.IO;
 using Sevenfold.Board;
 using Sevenfold.Core;
+using Sevenfold.Player;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEditor.TestTools.TestRunner.Api;
@@ -15,7 +16,14 @@ namespace Sevenfold.EditorTools
         private const string RootDataPath = "Assets/_Sevenfold/Data";
         private const string ConfigPath = "Assets/_Sevenfold/Data/Config/GameConfig.asset";
         private const string BoardPath = "Assets/_Sevenfold/Data/Boards/Board_Main.asset";
+        private const string PlayerPresentationPath = "Assets/_Sevenfold/Data/Config/PlayerPresentation.asset";
+        private const string InputConfigPath = "Assets/_Sevenfold/Data/Config/InputConfig.asset";
+
         private const string TileMaterialPath = "Assets/_Sevenfold/Art/Materials/M_Tile_Default.mat";
+        private const string PlayerBodyMaterialPath = "Assets/_Sevenfold/Art/Materials/M_Player_Body.mat";
+        private const string PlayerHatMaterialPath = "Assets/_Sevenfold/Art/Materials/M_Player_Hat.mat";
+        private const string ConeHatMeshPath = "Assets/_Sevenfold/Art/Models/PlayerHat_Cone.asset";
+        private const string PlayerPrefabPath = "Assets/_Sevenfold/Prefabs/Player/PlayerPawn.prefab";
 
         private const string TileNormalPath = "Assets/_Sevenfold/Data/Tiles/Tile_Normal.asset";
         private const string TileStarPath = "Assets/_Sevenfold/Data/Tiles/Tile_Star.asset";
@@ -166,6 +174,36 @@ namespace Sevenfold.EditorTools
             // 5. Default Material
             GetOrCreateTileMaterial();
 
+            // 6. Player Presentation Config
+            var playerPres = GetOrCreateScriptableObject<PlayerPresentationSO>(PlayerPresentationPath);
+            playerPres.MoveDuration = 0.22f;
+            playerPres.HopHeight = 0.12f;
+            playerPres.LandingSquash = 0.1f;
+            playerPres.LandingDuration = 0.1f;
+            playerPres.IdleBobAmount = 0.03f;
+            playerPres.IdleBobSpeed = 1.5f;
+            EditorUtility.SetDirty(playerPres);
+
+            // 7. Input Config
+            var inputConfig = GetOrCreateScriptableObject<InputConfigSO>(InputConfigPath);
+            inputConfig.RollBindings = new[] { "<Keyboard>/space" };
+            inputConfig.UpBindings = new[] { "<Keyboard>/w", "<Keyboard>/upArrow" };
+            inputConfig.DownBindings = new[] { "<Keyboard>/s", "<Keyboard>/downArrow" };
+            inputConfig.LeftBindings = new[] { "<Keyboard>/a", "<Keyboard>/leftArrow" };
+            inputConfig.RightBindings = new[] { "<Keyboard>/d", "<Keyboard>/rightArrow" };
+            inputConfig.EndTurnBindings = new[] { "<Keyboard>/enter", "<Keyboard>/numpadEnter" };
+            inputConfig.UseCharmBindings = new[] { "<Keyboard>/c" };
+            inputConfig.PauseBindings = new[] { "<Keyboard>/escape" };
+            EditorUtility.SetDirty(inputConfig);
+
+            // 8. Player Materials & Models
+            var coneMesh = GetOrCreateConeMesh();
+            var bodyMat = GetOrCreateMaterial(PlayerBodyMaterialPath, "M_Player_Body", "#EE6055");
+            var hatMat = GetOrCreateMaterial(PlayerHatMaterialPath, "M_Player_Hat", "#5B2A86");
+
+            // 9. Player Prefab
+            CreateOrUpdatePlayerPrefab(playerPres, bodyMat, hatMat, coneMesh);
+
             AssetDatabase.SaveAssets();
             AssetDatabase.Refresh();
 
@@ -218,20 +256,25 @@ namespace Sevenfold.EditorTools
                 Undo.RegisterCreatedObjectUndo(envRoot, "Create EnvironmentRoot");
             }
 
-            // Load board data & material
+            // Load data assets
+            var config = AssetDatabase.LoadAssetAtPath<GameConfigSO>(ConfigPath);
             var boardDef = AssetDatabase.LoadAssetAtPath<BoardDefinitionSO>(BoardPath);
-            if (boardDef == null)
+            var playerPres = AssetDatabase.LoadAssetAtPath<PlayerPresentationSO>(PlayerPresentationPath);
+            var inputConfig = AssetDatabase.LoadAssetAtPath<InputConfigSO>(InputConfigPath);
+            var playerPrefab = AssetDatabase.LoadAssetAtPath<GameObject>(PlayerPrefabPath);
+
+            if (config == null || boardDef == null || playerPres == null || inputConfig == null || playerPrefab == null)
             {
                 CreateOrUpdateDefaultData();
+                config = AssetDatabase.LoadAssetAtPath<GameConfigSO>(ConfigPath);
                 boardDef = AssetDatabase.LoadAssetAtPath<BoardDefinitionSO>(BoardPath);
+                playerPres = AssetDatabase.LoadAssetAtPath<PlayerPresentationSO>(PlayerPresentationPath);
+                inputConfig = AssetDatabase.LoadAssetAtPath<InputConfigSO>(InputConfigPath);
+                playerPrefab = AssetDatabase.LoadAssetAtPath<GameObject>(PlayerPrefabPath);
             }
             var tileMaterial = GetOrCreateTileMaterial();
 
-            // 3. __Generated_GameRoot
-            var gameRoot = new GameObject("__Generated_GameRoot");
-            Undo.RegisterCreatedObjectUndo(gameRoot, "Create __Generated_GameRoot");
-
-            // 4. __Generated_BoardRoot
+            // 3. __Generated_BoardRoot
             var boardRoot = new GameObject("__Generated_BoardRoot");
             Undo.RegisterCreatedObjectUndo(boardRoot, "Create __Generated_BoardRoot");
 
@@ -248,7 +291,52 @@ namespace Sevenfold.EditorTools
             // Populate cells in editor scene
             boardBuilder.Build();
 
-            // 5. __Generated_CameraRig
+            // 4. __Generated_PlayerRoot
+            GameObject playerGo;
+            if (playerPrefab != null)
+            {
+                playerGo = (GameObject)PrefabUtility.InstantiatePrefab(playerPrefab);
+                Undo.RegisterCreatedObjectUndo(playerGo, "Create __Generated_PlayerRoot");
+            }
+            else
+            {
+                var bodyMat = GetOrCreateMaterial(PlayerBodyMaterialPath, "M_Player_Body", "#EE6055");
+                var hatMat = GetOrCreateMaterial(PlayerHatMaterialPath, "M_Player_Hat", "#5B2A86");
+                var coneMesh = GetOrCreateConeMesh();
+                playerGo = CreatePlayerPawnHierarchy(null, playerPres, bodyMat, hatMat, coneMesh);
+                Undo.RegisterCreatedObjectUndo(playerGo, "Create __Generated_PlayerRoot");
+            }
+            playerGo.name = "__Generated_PlayerRoot";
+
+            var grid = new BoardGrid(boardDef);
+            playerGo.transform.position = grid.CellToLocal(boardDef.StartCell);
+
+            var playerMover = playerGo.GetComponent<PlayerGridMover>();
+            var moverSo = new SerializedObject(playerMover);
+            moverSo.FindProperty("_presentation").objectReferenceValue = playerPres;
+            moverSo.FindProperty("_visualChild").objectReferenceValue = playerGo.transform.Find("Visual");
+            moverSo.ApplyModifiedPropertiesWithoutUndo();
+
+            // 5. __Generated_GameRoot
+            var gameRoot = new GameObject("__Generated_GameRoot");
+            Undo.RegisterCreatedObjectUndo(gameRoot, "Create __Generated_GameRoot");
+
+            var inputRouter = gameRoot.AddComponent<PlayerInputRouter>();
+            var inputSo = new SerializedObject(inputRouter);
+            inputSo.FindProperty("_config").objectReferenceValue = inputConfig;
+            inputSo.FindProperty("_inputEnabled").boolValue = true;
+            inputSo.ApplyModifiedPropertiesWithoutUndo();
+
+            var debugHarness = gameRoot.AddComponent<DebugMovementHarness>();
+            var harnessSo = new SerializedObject(debugHarness);
+            harnessSo.FindProperty("_config").objectReferenceValue = config;
+            harnessSo.FindProperty("_board").objectReferenceValue = boardDef;
+            harnessSo.FindProperty("_boardBuilder").objectReferenceValue = boardBuilder;
+            harnessSo.FindProperty("_inputRouter").objectReferenceValue = inputRouter;
+            harnessSo.FindProperty("_playerMover").objectReferenceValue = playerMover;
+            harnessSo.ApplyModifiedPropertiesWithoutUndo();
+
+            // 6. __Generated_CameraRig
             var camRig = new GameObject("__Generated_CameraRig");
             Undo.RegisterCreatedObjectUndo(camRig, "Create __Generated_CameraRig");
             camRig.tag = "MainCamera";
@@ -278,7 +366,7 @@ namespace Sevenfold.EditorTools
             camSo.ApplyModifiedPropertiesWithoutUndo();
             framer.RecalculateFraming();
 
-            // 6. __Generated_Lighting
+            // 7. __Generated_Lighting
             var lightGo = new GameObject("__Generated_Lighting");
             Undo.RegisterCreatedObjectUndo(lightGo, "Create __Generated_Lighting");
             lightGo.transform.position = new Vector3(0f, 10f, 0f);
@@ -291,11 +379,11 @@ namespace Sevenfold.EditorTools
             light.shadows = LightShadows.Soft;
             light.shadowStrength = 0.6f;
 
-            // 7. Save scene
+            // 8. Save scene
             EditorSceneManager.MarkSceneDirty(scene);
             EditorSceneManager.SaveScene(scene, GameplayScenePath);
 
-            // 8. EditorBuildSettings: MainMenu (if exists) at index 0, Gameplay at index 1
+            // 9. EditorBuildSettings: MainMenu (if exists) at index 0, Gameplay at index 1
             UpdateEditorBuildSettings();
 
             Debug.Log($"<color=green>[Sevenfold] Gameplay Scene built successfully at {GameplayScenePath}.</color>");
@@ -312,6 +400,9 @@ namespace Sevenfold.EditorTools
         {
             var config = AssetDatabase.LoadAssetAtPath<GameConfigSO>(ConfigPath);
             var board = AssetDatabase.LoadAssetAtPath<BoardDefinitionSO>(BoardPath);
+            var playerPres = AssetDatabase.LoadAssetAtPath<PlayerPresentationSO>(PlayerPresentationPath);
+            var inputConfig = AssetDatabase.LoadAssetAtPath<InputConfigSO>(InputConfigPath);
+            var playerPrefab = AssetDatabase.LoadAssetAtPath<GameObject>(PlayerPrefabPath);
 
             int failures = 0;
 
@@ -387,6 +478,109 @@ namespace Sevenfold.EditorTools
                 }
             }
 
+            // Player presentation checks
+            if (playerPres == null)
+            {
+                Debug.LogError($"[Sevenfold] FAIL: PlayerPresentationSO not found at {PlayerPresentationPath}");
+                failures++;
+            }
+            else
+            {
+                if (playerPres.MoveDuration > 0f)
+                    Debug.Log($"[Sevenfold] PASS: Player move duration valid ({playerPres.MoveDuration}s > 0)");
+                else
+                {
+                    Debug.LogError($"[Sevenfold] FAIL: Player move duration must be > 0, was {playerPres.MoveDuration}");
+                    failures++;
+                }
+
+                if (playerPres.LandingDuration >= 0f)
+                    Debug.Log($"[Sevenfold] PASS: Player landing duration valid ({playerPres.LandingDuration}s >= 0)");
+                else
+                {
+                    Debug.LogError($"[Sevenfold] FAIL: Player landing duration must be >= 0, was {playerPres.LandingDuration}");
+                    failures++;
+                }
+
+                if (playerPres.IdleBobSpeed > 0f)
+                    Debug.Log($"[Sevenfold] PASS: Player idle bob speed valid ({playerPres.IdleBobSpeed} > 0)");
+                else
+                {
+                    Debug.LogError($"[Sevenfold] FAIL: Player idle bob speed must be > 0, was {playerPres.IdleBobSpeed}");
+                    failures++;
+                }
+            }
+
+            // Input config checks
+            if (inputConfig == null)
+            {
+                Debug.LogError($"[Sevenfold] FAIL: InputConfigSO not found at {InputConfigPath}");
+                failures++;
+            }
+            else
+            {
+                if (inputConfig.RollBindings != null && inputConfig.RollBindings.Length > 0)
+                    Debug.Log("[Sevenfold] PASS: Input roll bindings configured.");
+                else
+                {
+                    Debug.LogError("[Sevenfold] FAIL: Input roll bindings missing or empty.");
+                    failures++;
+                }
+
+                if (inputConfig.UpBindings != null && inputConfig.UpBindings.Length > 0 &&
+                    inputConfig.DownBindings != null && inputConfig.DownBindings.Length > 0 &&
+                    inputConfig.LeftBindings != null && inputConfig.LeftBindings.Length > 0 &&
+                    inputConfig.RightBindings != null && inputConfig.RightBindings.Length > 0)
+                {
+                    Debug.Log("[Sevenfold] PASS: Movement directional bindings configured (Up/Down/Left/Right).");
+                }
+                else
+                {
+                    Debug.LogError("[Sevenfold] FAIL: One or more movement directional bindings are missing or empty.");
+                    failures++;
+                }
+            }
+
+            // Player prefab checks
+            if (playerPrefab == null)
+            {
+                Debug.LogError($"[Sevenfold] FAIL: Player prefab not found at {PlayerPrefabPath}");
+                failures++;
+            }
+            else
+            {
+                var mover = playerPrefab.GetComponent<PlayerGridMover>();
+                if (mover != null)
+                {
+                    Debug.Log("[Sevenfold] PASS: Player prefab has PlayerGridMover component.");
+                    var moverSo = new SerializedObject(mover);
+                    if (moverSo.FindProperty("_presentation").objectReferenceValue != null)
+                    {
+                        Debug.Log("[Sevenfold] PASS: Player prefab PlayerGridMover has PlayerPresentationSO assigned.");
+                    }
+                    else
+                    {
+                        Debug.LogError("[Sevenfold] FAIL: Player prefab PlayerGridMover missing PlayerPresentationSO reference.");
+                        failures++;
+                    }
+
+                    if (moverSo.FindProperty("_visualChild").objectReferenceValue != null)
+                    {
+                        Debug.Log("[Sevenfold] PASS: Player prefab PlayerGridMover has VisualChild Transform assigned.");
+                    }
+                    else
+                    {
+                        Debug.LogError("[Sevenfold] FAIL: Player prefab PlayerGridMover missing VisualChild reference.");
+                        failures++;
+                    }
+                }
+                else
+                {
+                    Debug.LogError("[Sevenfold] FAIL: Player prefab is missing PlayerGridMover component.");
+                    failures++;
+                }
+            }
+
             if (failures == 0)
             {
                 Debug.Log("<color=green>[Sevenfold] All data validated successfully! 0 errors.</color>");
@@ -431,6 +625,9 @@ namespace Sevenfold.EditorTools
             EnsureFolder("Assets/_Sevenfold/Data", "Blessings");
             EnsureFolder("Assets/_Sevenfold", "Art");
             EnsureFolder("Assets/_Sevenfold/Art", "Materials");
+            EnsureFolder("Assets/_Sevenfold/Art", "Models");
+            EnsureFolder("Assets/_Sevenfold", "Prefabs");
+            EnsureFolder("Assets/_Sevenfold/Prefabs", "Player");
         }
 
         private static void EnsureFolder(string parentFolder, string newFolder)
@@ -460,6 +657,174 @@ namespace Sevenfold.EditorTools
                 AssetDatabase.SaveAssets();
             }
             return mat;
+        }
+
+        private static Material GetOrCreateMaterial(string path, string name, string colorHex)
+        {
+            EnsureFolder("Assets/_Sevenfold", "Art");
+            EnsureFolder("Assets/_Sevenfold/Art", "Materials");
+
+            var mat = AssetDatabase.LoadAssetAtPath<Material>(path);
+            if (mat == null)
+            {
+                var shader = Shader.Find("Universal Render Pipeline/Lit");
+                if (shader == null)
+                {
+                    shader = Shader.Find("Standard");
+                }
+                mat = new Material(shader) { name = name };
+                if (ColorUtility.TryParseHtmlString(colorHex, out Color color))
+                {
+                    mat.color = color;
+                    if (mat.HasProperty("_BaseColor"))
+                    {
+                        mat.SetColor("_BaseColor", color);
+                    }
+                }
+                AssetDatabase.CreateAsset(mat, path);
+                AssetDatabase.SaveAssets();
+            }
+            return mat;
+        }
+
+        private static Mesh GetOrCreateConeMesh()
+        {
+            EnsureFolder("Assets/_Sevenfold", "Art");
+            EnsureFolder("Assets/_Sevenfold/Art", "Models");
+
+            var mesh = AssetDatabase.LoadAssetAtPath<Mesh>(ConeHatMeshPath);
+            if (mesh == null)
+            {
+                mesh = CreateConeMesh(0.2f, 0.35f, 16);
+                AssetDatabase.CreateAsset(mesh, ConeHatMeshPath);
+                AssetDatabase.SaveAssets();
+            }
+            return mesh;
+        }
+
+        private static Mesh CreateConeMesh(float radius, float height, int segments)
+        {
+            var mesh = new Mesh { name = "PlayerHat_Cone" };
+
+            var vertices = new List<Vector3>();
+            var triangles = new List<int>();
+
+            // Apex
+            vertices.Add(new Vector3(0f, height, 0f)); // Index 0
+
+            // Base ring
+            for (int i = 0; i < segments; i++)
+            {
+                float angle = (i / (float)segments) * Mathf.PI * 2f;
+                float x = Mathf.Cos(angle) * radius;
+                float z = Mathf.Sin(angle) * radius;
+                vertices.Add(new Vector3(x, 0f, z)); // Index 1 + i
+            }
+
+            // Base center
+            int baseCenterIndex = vertices.Count;
+            vertices.Add(Vector3.zero); // Index segments + 1
+
+            // Cone side triangles (Apex, next, current)
+            for (int i = 0; i < segments; i++)
+            {
+                int current = 1 + i;
+                int next = 1 + ((i + 1) % segments);
+                triangles.Add(0);
+                triangles.Add(next);
+                triangles.Add(current);
+            }
+
+            // Base cap triangles (Center, current, next)
+            for (int i = 0; i < segments; i++)
+            {
+                int current = 1 + i;
+                int next = 1 + ((i + 1) % segments);
+                triangles.Add(baseCenterIndex);
+                triangles.Add(current);
+                triangles.Add(next);
+            }
+
+            mesh.SetVertices(vertices);
+            mesh.SetTriangles(triangles, 0);
+            mesh.RecalculateNormals();
+            mesh.RecalculateBounds();
+            return mesh;
+        }
+
+        private static GameObject CreatePlayerPawnHierarchy(
+            Transform parent,
+            PlayerPresentationSO presentation,
+            Material bodyMaterial,
+            Material hatMaterial,
+            Mesh coneMesh)
+        {
+            var root = new GameObject("PlayerPawn");
+            if (parent != null)
+            {
+                root.transform.SetParent(parent, false);
+            }
+
+            var mover = root.AddComponent<PlayerGridMover>();
+
+            var visual = new GameObject("Visual");
+            visual.transform.SetParent(root.transform, false);
+
+            // Body (Capsule)
+            var body = GameObject.CreatePrimitive(PrimitiveType.Capsule);
+            body.name = "Body";
+            body.transform.SetParent(visual.transform, false);
+            body.transform.localPosition = new Vector3(0f, 0.5f, 0f);
+            body.transform.localScale = new Vector3(0.5f, 0.5f, 0.5f);
+
+            var bodyCollider = body.GetComponent<Collider>();
+            if (bodyCollider != null)
+            {
+                Object.DestroyImmediate(bodyCollider);
+            }
+
+            var bodyRenderer = body.GetComponent<MeshRenderer>();
+            if (bodyMaterial != null)
+            {
+                bodyRenderer.sharedMaterial = bodyMaterial;
+            }
+
+            // Hat (Cone)
+            var hat = new GameObject("Hat");
+            hat.transform.SetParent(visual.transform, false);
+            hat.transform.localPosition = new Vector3(0f, 0.95f, 0f);
+            hat.transform.localScale = Vector3.one;
+
+            var filter = hat.AddComponent<MeshFilter>();
+            filter.sharedMesh = coneMesh;
+
+            var hatRenderer = hat.AddComponent<MeshRenderer>();
+            if (hatMaterial != null)
+            {
+                hatRenderer.sharedMaterial = hatMaterial;
+            }
+
+            var moverSo = new SerializedObject(mover);
+            moverSo.FindProperty("_presentation").objectReferenceValue = presentation;
+            moverSo.FindProperty("_visualChild").objectReferenceValue = visual.transform;
+            moverSo.ApplyModifiedPropertiesWithoutUndo();
+
+            return root;
+        }
+
+        private static GameObject CreateOrUpdatePlayerPrefab(
+            PlayerPresentationSO presentation,
+            Material bodyMaterial,
+            Material hatMaterial,
+            Mesh coneMesh)
+        {
+            EnsureFolder("Assets/_Sevenfold", "Prefabs");
+            EnsureFolder("Assets/_Sevenfold/Prefabs", "Player");
+
+            var tempRoot = CreatePlayerPawnHierarchy(null, presentation, bodyMaterial, hatMaterial, coneMesh);
+            var prefab = PrefabUtility.SaveAsPrefabAsset(tempRoot, PlayerPrefabPath);
+            Object.DestroyImmediate(tempRoot);
+            return prefab;
         }
 
         private static T GetOrCreateScriptableObject<T>(string assetPath) where T : ScriptableObject
